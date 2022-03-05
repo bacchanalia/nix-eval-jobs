@@ -3,6 +3,7 @@
 #include <thread>
 
 #include <nix/config.h>
+#include <nix/args.hh>
 #include <nix/shared.hh>
 #include <nix/store-api.hh>
 #include <nix/eval.hh>
@@ -116,6 +117,18 @@ struct MyArgs : MixEvalArgs, MixCommonArgs
 
 static MyArgs myArgs;
 
+static Value* releaseExprTopLevelValue(EvalState & state, Bindings & autoArgs) {
+    Value vTop;
+
+    state.evalFile(lookupFileArg(state, myArgs.releaseExpr), vTop);
+
+    auto vRoot = state.allocValue();
+
+    state.autoCallFunction(autoArgs, vTop, *vRoot);
+
+    return vRoot;
+}
+
 static void worker(
     EvalState & state,
     Bindings & autoArgs,
@@ -124,6 +137,7 @@ static void worker(
     const Path &gcRootsDir)
 {
     Value vTop;
+    Value * vRoot;
 
     if (myArgs.flake) {
         using namespace flake;
@@ -153,12 +167,12 @@ static void worker(
             vTop = *nTop;
         }
 
-    } else {
-        state.evalFile(lookupFileArg(state, myArgs.releaseExpr), vTop);
-    }
+        vRoot = state.allocValue();
+        state.autoCallFunction(autoArgs, vTop, *vRoot);
 
-    auto vRoot = state.allocValue();
-    state.autoCallFunction(autoArgs, vTop, *vRoot);
+    } else {
+        vRoot = releaseExprTopLevelValue(state, autoArgs);
+    }
 
     while (true) {
         /* Wait for the master to send us a job name. */
@@ -167,21 +181,29 @@ static void worker(
         auto s = readLine(from.get());
         if (s == "exit") break;
         if (!hasPrefix(s, "do ")) abort();
-        std::string attrPath(s, 3);
+        std::string attrName(s, 3);
 
-        debug("worker process %d at '%s'", getpid(), attrPath);
+        debug("worker process %d at '%s'", getpid(), attrName);
 
         /* Evaluate it and send info back to the master. */
         nlohmann::json reply;
-        reply["attr"] = attrPath;
+        reply["attr"] = attrName;
 
         try {
-            auto vTmp = findAlongAttrPath(state, attrPath, autoArgs, *vRoot).first;
-
             auto v = state.allocValue();
-            state.autoCallFunction(autoArgs, *vTmp, *v);
 
-            if (auto drv = getDerivation(state, *v, false)) {
+            state.autoCallFunction(autoArgs, *vRoot, *v);
+
+            if (v->type() != nAttrs)
+                throw TypeError("root is of type '%s', expected a set", showType(*v));
+
+            if (attrName.empty()) throw Error("empty attribute name");
+
+            auto a = v->attrs->get(state.symbols.create(attrName));
+
+            if (!a) throw Error("attribute '%s' not found", attrName);
+
+            if (auto drv = getDerivation(state, *a->value, false)) {
 
                 if (drv->querySystem() == "unknown")
                     throw EvalError("derivation must have a 'system' attribute");
@@ -234,12 +256,7 @@ static void worker(
                 auto attrs = nlohmann::json::array();
                 StringSet ss;
                 for (auto & i : v->attrs->lexicographicOrder()) {
-                    std::string name(i->name);
-                    if (name.find('.') != std::string::npos || name.find(' ') != std::string::npos) {
-                        printError("skipping job with illegal name '%s'", name);
-                        continue;
-                    }
-                    attrs.push_back(name);
+                    attrs.push_back(i->name);
                 }
                 reply["attrs"] = std::move(attrs);
             }
@@ -247,7 +264,7 @@ static void worker(
             else if (v->type() == nNull)
                 ;
 
-            else throw TypeError("attribute '%s' is %s, which is not supported", attrPath, showType(*v));
+            else throw TypeError("attribute '%s' is %s, which is not supported", attrName, showType(*v));
 
         } catch (EvalError & e) {
             auto err = e.info();
@@ -309,7 +326,7 @@ int main(int argc, char * * argv)
 
         struct State
         {
-            std::set<std::string> todo{""};
+            std::set<std::string> todo{};
             std::set<std::string> active;
             std::exception_ptr exc;
         };
@@ -422,6 +439,18 @@ int main(int argc, char * * argv)
                 wakeup.notify_all();
             }
         };
+
+        EvalState initialState(myArgs.searchPath, openStore());
+        Bindings & autoArgs = *myArgs.getAutoArgs(initialState);
+
+        auto topLevelValue = releaseExprTopLevelValue(initialState, autoArgs);
+
+        if (topLevelValue->type() == nAttrs) {
+          auto state(state_.lock());
+          for (auto & a : topLevelValue->attrs->lexicographicOrder()) {
+            state->todo.insert(a->name);
+          }
+        }
 
         std::vector<std::thread> threads;
         for (size_t i = 0; i < myArgs.nrWorkers; i++)
