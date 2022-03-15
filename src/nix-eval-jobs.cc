@@ -121,6 +121,7 @@ static void worker(
 
     while (true) {
         /* Wait for the master to send us a job name. */
+        printf("worker process %d: next", getpid());
         writeLine(to.get(), "next");
 
         auto s = readLine(from.get());
@@ -128,7 +129,9 @@ static void worker(
         if (!hasPrefix(s, "do ")) abort();
         std::string attrName(s, 3);
 
+        printf("worker process %d at '%s'", getpid(), attrName.c_str());
         debug("worker process %d at '%s'", getpid(), attrName);
+
 
         /* Evaluate it and send info back to the master. */
         nlohmann::json reply;
@@ -228,6 +231,7 @@ static void worker(
             printError(e.msg());
         }
 
+        printf("worker process %d: <reply>", getpid());
         writeLine(to.get(), reply.dump());
 
         /* If our RSS exceeds the maximum, exit. The master will
@@ -237,6 +241,7 @@ static void worker(
         if ((size_t) r.ru_maxrss > myArgs.maxMemorySize * 1024) break;
     }
 
+    printf("worker process %d: restart", getpid());
     writeLine(to.get(), "restart");
 }
 
@@ -312,9 +317,11 @@ int main(int argc, char * * argv)
                                     auto msg = e.msg();
                                     err["error"] = filterANSIEscapes(msg, true);
                                     printError(msg);
+                                    printf("worker process %d: error", getpid());
                                     writeLine(to->get(), err.dump());
                                     // Don't forget to print it into the STDERR log, this is
                                     // what's shown in the Hydra UI.
+                                    printf("worker process %d: restart", getpid());
                                     writeLine(to->get(), "restart");
                                 }
                             },
@@ -322,6 +329,7 @@ int main(int argc, char * * argv)
                         from = std::move(fromPipe.readSide);
                         to = std::move(toPipe.writeSide);
                         debug("created worker process %d", pid);
+                        printf("created worker process %d", pid);
                     }
 
                     /* Check whether the existing worker process is still there. */
@@ -341,6 +349,7 @@ int main(int argc, char * * argv)
                         checkInterrupt();
                         auto state(state_.lock());
                         if ((state->todo.empty() && state->active.empty()) || state->exc) {
+                            printf("master to %d: exit", pid);
                             writeLine(to.get(), "exit");
                             return;
                         }
@@ -354,6 +363,7 @@ int main(int argc, char * * argv)
                     }
 
                     /* Tell the worker to evaluate it. */
+                    printf("master to %d: %s", pid, ("do " + attrPath).c_str());
                     writeLine(to.get(), "do " + attrPath);
 
                     /* Wait for the response. */
