@@ -121,7 +121,6 @@ static void worker(
 
     while (true) {
         /* Wait for the master to send us a job name. */
-        printf("worker process %d: next\n", getpid());
         writeLine(to.get(), "next");
 
         auto s = readLine(from.get());
@@ -129,7 +128,6 @@ static void worker(
         if (!hasPrefix(s, "do ")) abort();
         std::string attrName(s, 3);
 
-        printf("worker process %d at '%s'\n", getpid(), attrName.c_str());
         debug("worker process %d at '%s'", getpid(), attrName);
 
 
@@ -231,7 +229,6 @@ static void worker(
             printError(e.msg());
         }
 
-        printf("worker process %d: <reply>\n", getpid());
         writeLine(to.get(), reply.dump());
 
         /* If our RSS exceeds the maximum, exit. The master will
@@ -241,7 +238,6 @@ static void worker(
         if ((size_t) r.ru_maxrss > myArgs.maxMemorySize * 1024) break;
     }
 
-    printf("worker process %d: restart\n", getpid());
     writeLine(to.get(), "restart");
 }
 
@@ -317,11 +313,9 @@ int main(int argc, char * * argv)
                                     auto msg = e.msg();
                                     err["error"] = filterANSIEscapes(msg, true);
                                     printError(msg);
-                                    printf("worker process %d: error\n", getpid());
                                     writeLine(to->get(), err.dump());
                                     // Don't forget to print it into the STDERR log, this is
                                     // what's shown in the Hydra UI.
-                                    printf("worker process %d: restart\n", getpid());
                                     writeLine(to->get(), "restart");
                                 }
                             },
@@ -334,6 +328,7 @@ int main(int argc, char * * argv)
 
                     /* Check whether the existing worker process is still there. */
                     auto s = readLine(from.get());
+                    printf("worker %d: %s\n", pid, s.c_str());
                     if (s == "restart") {
                         pid = -1;
                         continue;
@@ -379,7 +374,7 @@ int main(int argc, char * * argv)
                         }
                     } else {
                         auto state(state_.lock());
-                        std::cout << respString << "\n" << std::flush;
+                        std::cout << "worker " << pid << ": " << respString << "\n" << std::flush;
                     }
 
                     /* Add newly discovered job names to the queue. */
