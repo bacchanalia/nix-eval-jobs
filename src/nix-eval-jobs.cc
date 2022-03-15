@@ -150,7 +150,7 @@ static void worker(
             if (a == v->attrs->end()) throw Error("attribute '%s' not found", attrName);
 
             if (auto drv = getDerivation(state, *a->value, false)) {
-
+                writeLine(to.get(), "debug: isDrv");
                 // Workaround for nixos "systems"
                 //
                 //  ... which have "system" attributes that are
@@ -158,14 +158,16 @@ static void worker(
                 std::string system;
 
                 auto systemAttr = a->value->attrs->find(state.symbols.create("system"));
-
+                writeLine(to.get(), "debug: test system");
                 if (systemAttr == a->value->attrs->end()) {
                     throw EvalError("derivation must have a 'system' attribute");
 
                 } else if (auto systemDrv = getDerivation(state, *systemAttr->value, false)) {
+                    writeLine(to.get(), "debug: system is drv");
                     system = systemDrv->querySystem();
 
                 } else {
+                    writeLine(to.get(), "debug: system is regular");
                     system = drv->querySystem();
 
                 }
@@ -203,6 +205,7 @@ static void worker(
                     reply["meta"] = meta;
                 }
 
+                writeLine(to.get(), "debug: exit isDrv");
             }
 
             else if (v->type == tAttrs)
@@ -332,6 +335,8 @@ int main(int argc, char * * argv)
                     if (s == "restart") {
                         pid = -1;
                         continue;
+                    } else if (hasPrefix(s, "debug")) {
+                        continue;
                     } else if (s != "next") {
                         auto json = nlohmann::json::parse(s);
                         throw Error("worker error: %s", (std::string) json["error"]);
@@ -363,6 +368,10 @@ int main(int argc, char * * argv)
 
                     /* Wait for the response. */
                     auto respString = readLine(from.get());
+                    while (hasPrefix(respString, "debug")) {
+                      printf("worker %d: %s\n", pid, respString.c_str());
+                      respString = readLine(from.get());
+                    }
                     auto response = nlohmann::json::parse(respString);
 
                     /* Handle the response. */
