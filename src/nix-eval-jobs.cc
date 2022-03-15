@@ -165,6 +165,7 @@ static void worker(
                 } else if (auto systemDrv = getDerivation(state, *systemAttr->value, false)) {
                     writeLine(to.get(), "debug: system is drv");
                     system = systemDrv->querySystem();
+                    writeLine(to.get(), "debug: systemDrv->querySystem() done");
 
                 } else {
                     writeLine(to.get(), "debug: system is regular");
@@ -175,10 +176,14 @@ static void worker(
                 if (system == "unknown")
                     throw EvalError("derivation must not have unknown system type");
 
+                writeLine(to.get(), "debug: system is known");
                 auto drvPath = drv->queryDrvPath();
+                writeLine(to.get(), "debug: drv->queryDrvPath() done");
                 auto outputs = drv->queryOutputs(false);
+                writeLine(to.get(), "debug: drv->queryOutputs(false) done");
 
                 reply["name"] = drv->queryName();
+                writeLine(to.get(), "debug: drv->queryName() done");
                 reply["system"] = system;
                 reply["drvPath"] = drvPath;
                 for (auto out : outputs){
@@ -186,15 +191,18 @@ static void worker(
                 }
 
                 if (myArgs.meta) {
+                    writeLine(to.get(), "debug: myArgs.meta");
                     nlohmann::json meta;
                     for (auto & name : drv->queryMetaNames()) {
                       PathSet context;
                       std::stringstream ss;
 
                       auto metaValue = drv->queryMeta(name);
+                      writeLine(to.get(), "debug: drv->queryMeta(name) done");
                       // Skip non-serialisable types
                       // TODO: Fix serialisation of derivations to store paths
                       if (metaValue == 0) {
+                        writeLine(to.get(), "debug: metaValue == 0");
                         continue;
                       }
 
