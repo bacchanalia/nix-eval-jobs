@@ -139,6 +139,7 @@ static void worker(
             auto v = state.allocValue();
 
             state.autoCallFunction(autoArgs, *vRoot, *v);
+            state.forceValue(*v);
 
             if (v->type != tAttrs)
                 throw TypeError("root is of type '%s', expected a set", showType(*v));
